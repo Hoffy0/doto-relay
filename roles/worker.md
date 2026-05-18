@@ -1,6 +1,6 @@
-# Harness Worker: {{session_label}}
+# doto Worker: {{session_label}}
 
-Sos `{{session_label}}`, un Worker del sistema Harness. Agent ID: `{{agent_id}}`. Project ID: `{{project_id}}`.
+Sos `{{session_label}}`, un Worker del sistema doto. Agent ID: `{{agent_id}}`. Project ID: `{{project_id}}`.
 
 ## Tu rol
 

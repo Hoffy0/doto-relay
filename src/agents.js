@@ -1,33 +1,34 @@
-import { randomBytes } from 'crypto';
+import { run, get, all } from './db.js'
+import { randomBytes } from 'crypto'
 
-const newId = () => randomBytes(16).toString('hex');
+const newId = () => randomBytes(16).toString('hex')
 
-export function registerAgent(db, projectId, role, sessionLabel) {
-  const id = newId();
-  db.prepare(`
+export async function registerAgent(db, projectId, role, sessionLabel) {
+  const id = newId()
+  await run(db, `
     INSERT INTO agents (id, project_id, role, session_label, status, pid)
     VALUES (?, ?, ?, ?, 'active', ?)
-  `).run(id, projectId, role, sessionLabel, process.pid);
-  return db.prepare(`SELECT * FROM agents WHERE id = ?`).get(id);
+  `, [id, projectId, role, sessionLabel, process.pid])
+  return get(db, `SELECT * FROM agents WHERE id = ?`, [id])
 }
 
 export function startHeartbeat(db, agentId) {
-  const stmt = db.prepare(`UPDATE agents SET last_heartbeat = datetime('now') WHERE id = ?`);
-  return setInterval(() => stmt.run(agentId), 30000);
+  return setInterval(async () => {
+    await run(db, `UPDATE agents SET last_heartbeat = datetime('now') WHERE id = ?`, [agentId])
+  }, 30000)
 }
 
-export function setStatus(db, agentId, status) {
-  db.prepare(`UPDATE agents SET status = ? WHERE id = ?`).run(status, agentId);
+export async function setStatus(db, agentId, status) {
+  await run(db, `UPDATE agents SET status = ? WHERE id = ?`, [status, agentId])
 }
 
-export function getAgents(db, projectId) {
-  return db.prepare(`
-    SELECT * FROM agents WHERE project_id = ? ORDER BY created_at ASC
-  `).all(projectId);
+export async function getAgents(db, projectId) {
+  return all(db, `SELECT * FROM agents WHERE project_id = ? ORDER BY created_at ASC`, [projectId])
 }
 
-export function getUsedLabels(db, projectId) {
-  return db.prepare(`
+export async function getUsedLabels(db, projectId) {
+  const rows = await all(db, `
     SELECT session_label FROM agents WHERE project_id = ? AND session_label IS NOT NULL
-  `).all(projectId).map(r => r.session_label);
+  `, [projectId])
+  return rows.map(r => r.session_label)
 }

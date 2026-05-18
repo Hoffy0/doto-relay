@@ -5,43 +5,60 @@ import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 import { randomBytes } from 'crypto';
 
-import { findDbPath, openDb, getOrCreateDb } from './db.js';
+import { isPostgres, getDb, findDbPath, initSchema, run, get } from './db.js';
 import { registerAgent, startHeartbeat, setStatus, getAgents, getUsedLabels } from './agents.js';
 import { listTasks, getTaskCounts } from './tasks.js';
 import { loadTheme, pickAgentName, formatMessage } from './themes.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const HARNESS_ROOT = join(__dirname, '..');
-const HOOKS_DIR = join(HARNESS_ROOT, 'hooks');
-const ROLES_DIR = join(HARNESS_ROOT, 'roles');
+const ROOT = join(__dirname, '..');
+const HOOKS_DIR = join(ROOT, 'hooks');
+const ROLES_DIR = join(ROOT, 'roles');
 
 const newId = () => randomBytes(16).toString('hex');
 
-function ensureProject(db, cwd) {
-  let project = db.prepare(`SELECT * FROM projects WHERE root_path = ?`).get(cwd);
+async function ensureProject(db, cwd) {
+  let project = await get(db, `SELECT * FROM projects WHERE root_path = ?`, [cwd]);
   if (!project) {
     const id = newId();
-    db.prepare(`INSERT INTO projects (id, name, root_path) VALUES (?, ?, ?)`).run(id, basename(cwd), cwd);
-    project = db.prepare(`SELECT * FROM projects WHERE id = ?`).get(id);
+    await run(db, `INSERT INTO projects (id, name, root_path) VALUES (?, ?, ?)`, [id, basename(cwd), cwd]);
+    project = await get(db, `SELECT * FROM projects WHERE id = ?`, [id]);
   }
   return project;
 }
 
-function requireDb() {
+async function requireDb() {
+  if (isPostgres) {
+    const db = getDb(null);
+    try { await db.query('SELECT 1'); } catch (err) {
+      console.error(`[doto] Postgres connection failed: ${err.message}`);
+      process.exit(1);
+    }
+    const project = await get(db, `SELECT * FROM projects WHERE root_path = ?`, [process.cwd()]);
+    if (!project) {
+      console.error('No project found for this directory. Run `doto init` first.');
+      process.exit(1);
+    }
+    return { db, dbPath: null, project };
+  }
+
   const dbPath = findDbPath();
   if (!dbPath) {
-    console.error('No harness.db found. Run `doto init` first.');
+    console.error('No doto.db found. Run `doto init` first.');
     process.exit(1);
   }
-  const db = openDb(dbPath);
-  const project = db.prepare(`SELECT * FROM projects WHERE root_path = ?`).get(
-    dbPath.replace(/\/harness\.db$/, '')
-  );
+  const db = getDb(dbPath);
+  const project = await get(db, `SELECT * FROM projects WHERE root_path = ?`, [dbPath.replace(/\/doto\.db$/, '')]);
   if (!project) {
-    console.error('No project found in harness.db. Run `doto init` first.');
+    console.error('No project found in doto.db. Run `doto init` first.');
     process.exit(1);
   }
   return { db, dbPath, project };
+}
+
+function closeDb(db) {
+  if (isPostgres) return db.end();
+  db.close();
 }
 
 function writeSettings(projectRoot, agentId) {
@@ -52,7 +69,7 @@ function writeSettings(projectRoot, agentId) {
   }
 
   const hookCmd = (name) =>
-    `HARNESS_AGENT_ID=${agentId} node ${join(HOOKS_DIR, name)}`;
+    `DOTO_AGENT_ID=${agentId} node ${join(HOOKS_DIR, name)}`;
 
   const settings = {
     ...existing,
@@ -92,18 +109,34 @@ program.name('doto').description('Multi-agent relay system for Claude Code').ver
 
 // ── init ─────────────────────────────────────────────────────────────────────
 program.command('init')
-  .description('Initialize harness.db in the current project')
-  .action(() => {
+  .description('Initialize doto.db in the current project')
+  .action(async () => {
     const cwd = process.cwd();
-    const dbPath = join(cwd, 'harness.db');
-    if (existsSync(dbPath)) {
-      console.log(`harness.db already exists at ${dbPath}`);
+
+    if (isPostgres) {
+      const db = getDb(null);
+      try { await db.query('SELECT 1'); } catch (err) {
+        console.error(`[doto] Postgres connection failed: ${err.message}`);
+        process.exit(1);
+      }
+      await initSchema(db);
+      await ensureProject(db, cwd);
+      const url = process.env.DOTO_DB_URL.replace(/:([^:@]+)@/, ':***@');
+      console.log(`Initialized schema in Postgres (${url})`);
+      await db.end();
       return;
     }
-    const db = openDb(dbPath);
-    ensureProject(db, cwd);
+
+    const dbPath = join(cwd, 'doto.db');
+    if (existsSync(dbPath)) {
+      console.log(`doto.db already exists at ${dbPath}`);
+      return;
+    }
+    const db = getDb(dbPath);
+    await initSchema(db);
+    await ensureProject(db, cwd);
     db.close();
-    console.log(`Initialized harness.db at ${dbPath}`);
+    console.log(`Initialized doto.db at ${dbPath}`);
   });
 
 // ── start ─────────────────────────────────────────────────────────────────────
@@ -111,7 +144,7 @@ program.command('start')
   .description('Register agent and launch claude')
   .requiredOption('--role <role>', 'Agent role (orchestrator|worker|reviewer|dba)')
   .option('--theme <theme>', 'Theme name', 'default')
-  .action((opts) => {
+  .action(async (opts) => {
     const validRoles = ['orchestrator', 'worker', 'reviewer', 'dba'];
     if (!validRoles.includes(opts.role)) {
       console.error(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
@@ -119,46 +152,57 @@ program.command('start')
     }
 
     const cwd = process.cwd();
-    const { db, dbPath } = getOrCreateDb(cwd);
-    const projectRoot = dirname(dbPath);
-    const project = ensureProject(db, projectRoot);
+    let db, dbPath, projectRoot;
 
+    if (isPostgres) {
+      db = getDb(null);
+      try { await db.query('SELECT 1'); } catch (err) {
+        console.error(`[doto] Postgres connection failed: ${err.message}`);
+        process.exit(1);
+      }
+      await initSchema(db);
+      dbPath = null;
+      projectRoot = cwd;
+    } else {
+      dbPath = findDbPath(cwd) ?? join(cwd, 'doto.db');
+      db = getDb(dbPath);
+      await initSchema(db);
+      projectRoot = dirname(dbPath);
+    }
+
+    const project = await ensureProject(db, projectRoot);
     const theme = loadTheme(opts.theme);
-    const usedLabels = getUsedLabels(db, project.id);
+    const usedLabels = await getUsedLabels(db, project.id);
     const sessionLabel = pickAgentName(theme, usedLabels);
-
-    const agent = registerAgent(db, project.id, opts.role, sessionLabel);
+    const agent = await registerAgent(db, project.id, opts.role, sessionLabel);
     console.log(`[doto] ${sessionLabel} (${opts.role}) registered — ${agent.id}`);
 
     writeSettings(projectRoot, agent.id);
     writeClaudeMd(projectRoot, opts.role, agent.id, project.id, sessionLabel);
 
     const heartbeatTimer = startHeartbeat(db, agent.id);
-
     console.log(formatMessage(theme, 'ready', { agent: sessionLabel }));
+
+    const env = { ...process.env, DOTO_AGENT_ID: agent.id, DOTO_PROJECT_ID: project.id };
+    if (dbPath) env.DOTO_DB_PATH = dbPath;
 
     const child = spawn('claude', [], {
       stdio: 'inherit',
       cwd: projectRoot,
-      env: {
-        ...process.env,
-        HARNESS_AGENT_ID: agent.id,
-        HARNESS_DB_PATH: dbPath,
-        HARNESS_PROJECT_ID: project.id
-      }
+      env
     });
 
-    child.on('exit', (code) => {
+    child.on('exit', async (code) => {
       clearInterval(heartbeatTimer);
-      setStatus(db, agent.id, 'offline');
-      db.close();
+      await setStatus(db, agent.id, 'offline');
+      await closeDb(db);
       process.exit(code ?? 0);
     });
 
-    child.on('error', (err) => {
+    child.on('error', async (err) => {
       clearInterval(heartbeatTimer);
-      setStatus(db, agent.id, 'offline');
-      db.close();
+      await setStatus(db, agent.id, 'offline');
+      await closeDb(db);
       console.error(`[doto] Failed to launch claude: ${err.message}`);
       process.exit(1);
     });
@@ -167,23 +211,24 @@ program.command('start')
 // ── status ────────────────────────────────────────────────────────────────────
 program.command('status')
   .description('Show active agents and task counts')
-  .action(() => {
-    const { db, project } = requireDb();
+  .action(async () => {
+    const { db, project } = await requireDb();
 
     console.log(`\nProject: ${project.name} (${project.root_path})\n`);
 
-    const agents = getAgents(db, project.id);
+    const agents = await getAgents(db, project.id);
     if (agents.length === 0) {
       console.log('No agents registered.');
     } else {
       console.log('Agents:');
       for (const a of agents) {
-        const hb = a.last_heartbeat ? a.last_heartbeat.slice(11, 19) : '—';
+        const hbStr = a.last_heartbeat ? new Date(a.last_heartbeat).toISOString() : null;
+        const hb = hbStr ? hbStr.slice(11, 19) : '—';
         console.log(`  ${a.status.padEnd(8)} ${a.role.padEnd(13)} ${(a.session_label ?? '').padEnd(20)} pid:${a.pid ?? '—'}  hb:${hb}`);
       }
     }
 
-    const counts = getTaskCounts(db, project.id);
+    const counts = await getTaskCounts(db, project.id);
     if (counts.length > 0) {
       console.log('\nTasks:');
       for (const { status, count } of counts) {
@@ -193,20 +238,20 @@ program.command('status')
       console.log('\nNo tasks.');
     }
 
-    db.close();
+    await closeDb(db);
   });
 
 // ── tasks ─────────────────────────────────────────────────────────────────────
 program.command('tasks')
   .description('List project tasks')
   .option('--status <status>', 'Filter by status')
-  .action((opts) => {
-    const { db, project } = requireDb();
+  .action(async (opts) => {
+    const { db, project } = await requireDb();
 
-    const tasks = listTasks(db, project.id, { status: opts.status });
+    const tasks = await listTasks(db, project.id, { status: opts.status });
     if (tasks.length === 0) {
       console.log(opts.status ? `No tasks with status "${opts.status}".` : 'No tasks.');
-      db.close();
+      await closeDb(db);
       return;
     }
 
@@ -219,7 +264,7 @@ program.command('tasks')
       }
     }
 
-    db.close();
+    await closeDb(db);
   });
 
 program.parse();

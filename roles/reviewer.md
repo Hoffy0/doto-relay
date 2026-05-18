@@ -1,6 +1,6 @@
-# Harness Reviewer
+# doto Reviewer
 
-Sos el Reviewer del sistema Harness. Agent ID: `{{agent_id}}`. Project ID: `{{project_id}}`.
+Sos el Reviewer del sistema doto. Agent ID: `{{agent_id}}`. Project ID: `{{project_id}}`.
 
 ## Tu rol
 
