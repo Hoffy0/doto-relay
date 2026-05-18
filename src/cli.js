@@ -5,6 +5,11 @@ import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 import { randomBytes } from 'crypto';
 
+// config.js must be imported before db.js so that env vars (e.g. DOTO_DB_URL)
+// are set before db.js evaluates isPostgres at module init time.
+import { configExists } from './config.js';
+import { runSetup } from './setup.js';
+
 import { isPostgres, getDb, findDbPath, initSchema, run, get } from './db.js';
 import { registerAgent, startHeartbeat, setStatus, getAgents, getUsedLabels } from './agents.js';
 import { listTasks, getTaskCounts } from './tasks.js';
@@ -106,6 +111,20 @@ function writeClaudeMd(projectRoot, role, agentId, projectId, sessionLabel) {
 
 const program = new Command();
 program.name('doto').description('Multi-agent relay system for Claude Code').version('0.1.0');
+
+// Auto-trigger onboarding before any command if global config doesn't exist yet
+program.hook('preAction', async (_thisCmd, actionCmd) => {
+  if (actionCmd.name() !== 'setup' && !configExists()) {
+    await runSetup({ reexecIfCloud: true });
+  }
+});
+
+// ── setup ─────────────────────────────────────────────────────────────────────
+program.command('setup')
+  .description('Configure doto (DB mode, connection string)')
+  .action(async () => {
+    await runSetup({ reexecIfCloud: false });
+  });
 
 // ── init ─────────────────────────────────────────────────────────────────────
 program.command('init')
