@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "HARNESS_AGENT_ID=5e98df341d395252acda8cd895959a4d node /Users/hoffy/Developer/Hoffy0/doto-relay/hooks/user-prompt-submit.js"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "HARNESS_AGENT_ID=5e98df341d395252acda8cd895959a4d node /Users/hoffy/Developer/Hoffy0/doto-relay/hooks/stop.js"
+          }
+        ]
+      }
+    ]
+  }
+}

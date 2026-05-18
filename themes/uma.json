@@ -1,0 +1,16 @@
+{
+  "agents": [
+    "Special Week", "Silence Suzuka", "Tokai Teio",
+    "Daiwa Scarlet", "Vodka", "Gold Ship", "Mejiro McQueen",
+    "Nice Nature", "Winning Ticket", "Narita Brian"
+  ],
+  "messages": {
+    "task_done":     "{agent} terminó de {task_title} 🏆",
+    "task_claimed":  "{agent} tomó {task_title} 🏇",
+    "task_rejected": "{agent} necesita corregir {task_title} — {feedback} 🚩",
+    "escalated":     "{agent} no pudo resolver {task_title}, pasando al Trainer 👨‍⚖️",
+    "ready":         "¡Trainer, estoy lista! ¿Cuál es el próximo entrenamiento? 🎯",
+    "planning":      "Analizando el plan de entrenamiento...",
+    "done":          "¡Todas las carreras completadas! ゲートを開けろ！ 🏆"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "doto-relay",
+  "version": "0.1.0",
+  "description": "Multi-agent relay system for Claude Code",
+  "bin": { "doto": "./bin/harness" },
+  "type": "module",
+  "dependencies": {
+    "better-sqlite3": "^9.0.0",
+    "commander": "^12.0.0"
+  }
+}

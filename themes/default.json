@@ -1,0 +1,12 @@
+{
+  "agents": ["agent"],
+  "messages": {
+    "task_done":     "{agent} completó: {task_title}",
+    "task_claimed":  "{agent} tomó: {task_title}",
+    "task_rejected": "{agent} necesita corregir: {task_title} — {feedback}",
+    "escalated":     "{agent} escaló: {task_title} al orchestrator",
+    "ready":         "Listo. Esperando instrucción:",
+    "planning":      "Analizando y descomponiendo en tareas...",
+    "done":          "Todas las tareas completadas."
+  }
+}
