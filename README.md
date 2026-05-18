@@ -53,10 +53,10 @@ npm link          # makes `doto` available globally
 The first time you run any `doto` command, it asks you to choose a database mode:
 
 ```
-  doto — configuración
-? ¿Modo de base de datos?
-  › Local — SQLite en cada proyecto
-    Cloud — Supabase o cualquier Postgres
+  doto — setup
+? Database mode?
+  › Local — SQLite per project
+    Cloud — Supabase or any Postgres
 ```
 
 Your choice is saved to `~/.config/doto/config.env`. Subsequent runs start immediately without asking.
